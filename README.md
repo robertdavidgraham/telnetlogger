@@ -20,7 +20,18 @@ To log the information to files, use the `-p` and `-i` options.
 To listen on another port (for testing and whatnot), use `-l`.
 
     telnetlogger -l 2323
-  
+
+Note that on many systems, you'll get an "access denied" error message, because programs
+that open ports below 1024 need extra priveleges. So you may need to `sudo` the program.
+
+# Compiling
+
+Type `make` or:
+
+    gcc telnetlogger.c -o telnetlogger -lpthread
+
+It'll also compile/run on Windows.
+
 # Output
 
 There are two sample output files, `passwords.txt` and `ips.txt` that
