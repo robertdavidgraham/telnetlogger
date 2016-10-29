@@ -7,6 +7,11 @@ machines from around the world are trying to connect to Telnet on every IP addre
 per minute. This program logs both which IP addresses are doing the attempts, and which
 passwords they are using.
 
+I wrote it primarily because installing `telnetd` on a Raspberry Pi wasn't sufficient.
+For some reason, the Mirai botnet doesn't like the output from Telnet, and won't try
+to login. So I needed something that produced the type of Telnet is was expecting. While
+I was at it, I also wrote some code to parse things and extract the usernames/passwords.
+
 # Usage
 
 Just run the program in order to see passwords and IP addresses appear on stdout.
