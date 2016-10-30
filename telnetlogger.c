@@ -399,7 +399,7 @@ void *handle_connection(void *v_args)
 		struct timeval tv;
 		int err;
 
-		tv.tv_sec = 10;
+		tv.tv_sec = 60;
 		tv.tv_usec = 0;
 
 		err = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&tv, sizeof(tv));
