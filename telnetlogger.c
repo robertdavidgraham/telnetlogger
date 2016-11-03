@@ -136,6 +136,20 @@ create_ipv6_socket(int port)
 		}
 	}
 
+#ifndef WIN32
+	/* Reuse address */
+	{
+		int yes = 1;
+		err = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char*)&yes, sizeof(yes));
+		if (err != 0) {
+			ERROR_MSG("setsockopt(SO_REUSEADDR): %s\n",
+				error_msg(WSAGetLastError()));
+			closesocket(fd);
+			return -1;
+		}
+	}
+#endif
+
 	/* Bind to local port. Again note that while I"m binding for IPv6, it's
 	 * also setting up a service for IPv4. */
 	memset(&localaddr, 0, sizeof(localaddr));
