@@ -314,7 +314,8 @@ recv_nvt_line(int fd, char *buf, int sizeof_buf, int flags, int *in_state)
 				state = 6;
 				break;
 			case 255:
-				buf[offset++] = 0xFF;
+				if (offset + 1 < sizeof_buf)
+					buf[offset++] = 0xFF;
 				state = 0;
 				break;
 			default:
