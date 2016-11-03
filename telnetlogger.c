@@ -392,6 +392,11 @@ void *handle_connection(void *v_args)
 	int state = 0;
 	char *hello;
 	int tries = 0;
+	int flags = 0;
+
+#ifdef MSG_NOSIGNAL
+	flags |= MSG_NOSIGNAL;
+#endif
 
 
 	/* Set receive timeout of 1 minute. Windows can go suck an egg by deciding
@@ -439,16 +444,16 @@ void *handle_connection(void *v_args)
 again:
 
 	/* LOGIN: send the "login: " string, then wait for response */
-	send(fd, hello, strlen(hello), 0);
-	login_length = recv_nvt_line(fd, login, sizeof(login), 0, &state);
+	send(fd, hello, strlen(hello), flags);
+	login_length = recv_nvt_line(fd, login, sizeof(login), flags, &state);
 	if (login_length <= 0)
 		goto error;
 
 	/* PASSWORD: send the "password: " string, then wait for response */
-	send(fd, "\r\nPassword: ", 12, 0);
+	send(fd, "\r\nPassword: ", 12, flags);
 	if (state == 0)
 		state = 1;
-	password_length = recv_nvt_line(fd, password, sizeof(password), 0, &state);
+	password_length = recv_nvt_line(fd, password, sizeof(password), flags, &state);
 	if (password_length <= 0)
 		goto error;
 
@@ -459,7 +464,7 @@ again:
 	/* Print error and loop around to do it again */
 	if (state == 1)
 		state = 0;
-	send(fd, "\r\nLogin incorrect\r\n", 19, 0);
+	send(fd, "\r\nLogin incorrect\r\n", 19, flags);
 	if (tries++ < 5) {
 		sleep(2);
 		hello = "\r\nlogin: ";
