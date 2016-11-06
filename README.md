@@ -89,6 +89,11 @@ This produces results like:
     169 122.96.31.201
     414 119.121.165.137
     
+# Geolocation
 
+This project can help you geo-locate the IPs, to see which country
+they are coming from.
+
+	https://github.com/danielmiessler/HoneyCredIPTracker
 
   
