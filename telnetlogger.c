@@ -1,10 +1,19 @@
 /******************************************************************************
+	TELNETLOGGER
+
 	A quick and dirty Telnet honeypot for catching Mirai bots.
 
 	Tips for reading the code:
 		- it runs on Windows, Linux, and Mac OS
 		- it's IPv6 and IPv4 enabled
 		- I deal with Telnet option negotiation with a state-machine
+
+	Contributions:
+		- Andrew Beard suggested CSV format, to make it more Splunk-able
+		- Stefan Laudemann pointed out flaw in send() on closed ports
+		  causing a signal.
+		- Stefan Laudemann pointed out flaw in pthread_create causing
+		  memory leak.
 
 ******************************************************************************/
 #define _CRT_SECURE_NO_WARNINGS 1
@@ -13,19 +22,14 @@
 #include <WS2tcpip.h>
 #include <intrin.h>
 #include <process.h>
-//#define snprintf _snprintf
 #define sleep(secs) Sleep(1000*(secs))
 #define WSA(err) (WSA##err)
-#define strdup _strdup
 typedef CRITICAL_SECTION pthread_mutex_t;
 #define pthread_mutex_lock(p) EnterCriticalSection(p)
 #define pthread_mutex_unlock(p) LeaveCriticalSection(p)
 #define pthread_mutex_init(p,q) InitializeCriticalSection(p)
-typedef uintptr_t pthread_t;
-#define __sync_fetch_and_add(p,n) InterlockedExchangeAdd(p, n)
-#define __sync_fetch_and_sub(p,n) InterlockedExchangeAdd(p, -(n))
 #define pthread_create(handle,x,pfn,data) (*(handle)) = _beginthread(pfn,0,data)
-#define usleep(microseconds) Sleep((microseconds)/1000)
+typedef uintptr_t pthread_t;
 #else
 #include <stdlib.h>
 #include <sys/types.h>
@@ -48,6 +52,7 @@ typedef uintptr_t pthread_t;
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <time.h>
 
 /******************************************************************************
  * A mutex so multiple threads printing output don't conflict with
@@ -55,13 +60,18 @@ typedef uintptr_t pthread_t;
  ******************************************************************************/
 pthread_mutex_t output;
 
+
 /******************************************************************************
+ * Arguments pass to each thread. Creating a thread only allows passing in
+ * a single pointer, so we have to put everything we want passed to the
+ * thread in a structure like this.
  ******************************************************************************/
 struct ThreadArgs {
 	pthread_t handle;
 	int fd;
 	FILE *fp_passwords;
 	FILE *fp_ips;
+	FILE *fp_csv;
 	struct sockaddr_in6 peer;
 	socklen_t peerlen;
 	char peername[256];
@@ -82,6 +92,7 @@ error_msg(unsigned err)
 	case WSA(ECONNABORTED): return "Connection aborted";
 	case WSA(EACCES): return "Access denied";
 	case WSA(EADDRINUSE): return "Port already in use";
+	case 11: return "Timed out";
 	case 0: return "TCP connection closed";
 	default:   
 		snprintf(buf, sizeof(buf), "err#%u", err);
@@ -188,7 +199,7 @@ print_string(FILE *fp, const char *str, int len)
 	int i;
 	for (i = 0; i < len; i++) {
 		char c = str[i];
-		if (!isprint(c & 0xFF) || c == '\\' || c == '<' || c == '\'' || c == ' ')
+		if (!isprint(c & 0xFF) || c == '\\' || c == '<' || c == '\'' || c == ' ' || c == '\"' || c == ',')
 			fprintf(fp, "\\x%02x", c & 0xFF);
 		else
 			fprintf(fp, "%c", c);
@@ -213,6 +224,9 @@ matches(const char *rhs, const char *lhs, int len)
 void
 print_passwords(FILE *fp, const char *login, int login_len, const char *password, int password_len)
 {
+	if (fp == NULL)
+		return;
+
 	if (matches("shell", login, login_len) && matches("sh", password, password_len))
 		return;
 	if (matches("enable", login, login_len) && matches("system", password, password_len))
@@ -229,16 +243,58 @@ print_passwords(FILE *fp, const char *login, int login_len, const char *password
 }
 
 /******************************************************************************
-* Print the results.
-******************************************************************************/
+ * Print which machines are connecting
+ ******************************************************************************/
 void
 print_ip(FILE *fp, const char *hostname)
 {
+	if (fp == NULL)
+		return;
+
 	pthread_mutex_lock(&output);
 	fprintf(fp, "%s\n", hostname);
 	fflush(fp);
 	pthread_mutex_unlock(&output);
 }
+
+
+/******************************************************************************
+ * Create a CSV formatted line with all the information on one line.
+ ******************************************************************************/
+void
+print_csv(FILE *fp, time_t now, const char *hostname,
+	const char *login, int login_len,
+	const char *password, int password_len)
+{
+	struct tm *tm;
+	char str[128];
+
+	if (fp == NULL)
+		return;
+
+	tm = gmtime(&now);
+	if (tm == NULL) {
+		perror("gmtime");
+		return;
+	}
+
+	strftime(str, sizeof(str), "%Y-%m-%d %H:%M:%S", tm);
+
+	pthread_mutex_lock(&output);
+
+	/* time-integer, time-formatted, username, password*/
+	fprintf(fp, "%u,%s,%s,",
+		(unsigned)now,
+		str,
+		hostname);
+	print_string(fp, login, login_len);
+	fprintf(fp, ",");
+	print_string(fp, password, password_len);
+	fprintf(fp, "\n");
+
+	pthread_mutex_unlock(&output);
+}
+
 
 /******************************************************************************
  * Receive a line of NVT text, until the <return> character. While doing this
@@ -460,6 +516,7 @@ again:
 	/* Print the resulting username/password combination */
 	print_passwords(args->fp_passwords, login, login_length, password, password_length);
 	print_ip(args->fp_ips, args->peername);
+	print_csv(args->fp_csv, time(0), args->peername, login, login_length, password, password_length);
 
 	/* Print error and loop around to do it again */
 	if (state == 1)
@@ -487,7 +544,7 @@ error:
 /******************************************************************************
  ******************************************************************************/
 void
-daemon_thread(int port, FILE *fp_passwords, FILE *fp_ips)
+daemon_thread(int port, FILE *fp_passwords, FILE *fp_ips, FILE *fp_csv)
 {
 
 	int fd;
@@ -514,6 +571,7 @@ daemon_thread(int port, FILE *fp_passwords, FILE *fp_ips)
 		args->fd = newfd;
 		args->fp_passwords = fp_passwords;
 		args->fp_ips = fp_ips;
+		args->fp_csv = fp_csv;
 		args->peerlen = sizeof(args->peer);
 		getpeername(args->fd, (struct sockaddr*)&args->peer, &args->peerlen);
 		getnameinfo((struct sockaddr*)&args->peer, args->peerlen, args->peername, sizeof(args->peername), NULL, 0, NI_NUMERICHOST| NI_NUMERICSERV);
@@ -522,11 +580,65 @@ daemon_thread(int port, FILE *fp_passwords, FILE *fp_ips)
 		fprintf(stderr, "[+] %s: connect\n", args->peername);
 
 		pthread_create(&args->handle, 0, handle_connection, args);
+
+#ifndef WIN32
+		/* clean up the thread handle, otherwise we have a small memory
+		 * leak of handles. Thanks to Stefan Laudemann for pointing
+		 * this out. I suspect it's more than just 8 bytes for the handle,
+		 * but that there are kernel resources that we'll run out of
+		 * too. */
+		pthread_detach(args->handle);
+#endif
 	}
 
 	closesocket(fd);
 }
 
+/******************************************************************************
+******************************************************************************/
+FILE *
+open_output(int *in_i, char *argv[], int argc)
+{
+	int i = *in_i;
+	const char *filename = NULL;
+
+	/* Allow either with/without space:
+	 *	-cfilename.txt
+	 * or
+	 *	-c filename.txt 
+	 */
+	if (argv[i][2] == '\0') {
+		i = ++(*in_i);
+		if (i >= argc) {
+			fprintf(stderr, "expected parameter after -%c\n", argv[i][1]);
+			exit(1);
+		}
+		filename = argv[i];
+	}
+	else
+		filename = argv[i] + 2;
+
+	/* If the filename is a dash, then redirect to console output*/
+	if (strcmp(filename, "-") == 0)
+		return stdout;
+
+	/* If the filename is "NULL", then don't output anything */
+	else if (strcmp(filename, "null") == 0)
+		return NULL;
+
+	/* Create a file to output to*/
+	else {
+		FILE *fp;
+		fp = fopen(filename, "wt");
+		if (fp == NULL) {
+			perror(filename);
+			exit(1);
+			return NULL;
+		}
+		else
+			return fp;
+	}
+}
 
 /******************************************************************************
  ******************************************************************************/
@@ -535,6 +647,7 @@ main(int argc, char *argv[])
 {
 	FILE *fp_passwords = stdout;
 	FILE *fp_ips = stdout;
+	FILE *fp_csv = NULL;
 	int i;
 	int port = 23;
 
@@ -557,27 +670,14 @@ main(int argc, char *argv[])
 			exit(1);
 		}
 		switch (argv[i][1]) {
+		case 'c':
+			fp_csv = open_output(&i, argv, argc);
+			break;
 		case 'p':
-			if (++i >= argc) {
-				fprintf(stderr, "expected parameter after -%c\n", 'p');
-				exit(1);
-			}
-			fp_passwords = fopen(argv[i], "wt");
-			if (fp_passwords == NULL) {
-				perror(argv[i]);
-				exit(1);
-			}
+			fp_passwords = open_output(&i, argv, argc);
 			break;
 		case 'i':
-			if (++i >= argc) {
-				fprintf(stderr, "expected parameter after -%c\n", 'i');
-				exit(1);
-			}
-			fp_ips = fopen(argv[i], "wt");
-			if (fp_ips == NULL) {
-				perror(argv[i]);
-				exit(1);
-			}
+			fp_ips = open_output(&i, argv, argc);
 			break;
 		case 'l':
 		{
@@ -607,7 +707,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	daemon_thread(port, fp_passwords, fp_ips);
+	daemon_thread(port, fp_passwords, fp_ips, fp_csv);
 
 	return 0;
 }
