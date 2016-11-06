@@ -660,7 +660,7 @@ main(int argc, char *argv[])
 
 	pthread_mutex_init(&output, 0);
 
-	fprintf(stderr, "\n--- telnetlogger ---\n");
+	fprintf(stderr, "\n--- telnetlogger/0.2 ---\n");
 	fprintf(stderr, "https://github.com/robertdavidgraham/telnetlogger\n");
 
 	/* Read configuration parameters */
