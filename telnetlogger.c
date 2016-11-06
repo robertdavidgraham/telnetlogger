@@ -292,6 +292,7 @@ print_csv(FILE *fp, time_t now, const char *hostname,
 	print_string(fp, password, password_len);
 	fprintf(fp, "\n");
 
+	fflush(fp);
 	pthread_mutex_unlock(&output);
 }
 

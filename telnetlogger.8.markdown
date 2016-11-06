@@ -45,6 +45,19 @@ to the Raspberry Pi on port 2323.
 	port. If not specified, by default port 23 will be used. This may
 	require root priveleges to run on low-numbered ports.
     
+## OUTPUT FORMAT 
+
+The internet addresses are output in either IPv4 or IPv6 format as
+appropriate. Usernames and passwords are filter non-printable characters
+and some punctuation, replacing them with the standard \xXX format.
+
+The CSV format has the columns:
+
+	time_t, timestamp, address, username, password
+
+An example line is:
+
+	1478398395,2016-11-06 02:13:15,127.0.0.1,foo,bar
 
 ## COMPATIBILITY
 
