@@ -702,7 +702,7 @@ main(int argc, char *argv[])
 		case 'h':
 		case '?':
 		case 'H':
-			fprintf(stderr, "usage:\n telnetlogger [-p passwords.txt] [-i ips.txt]\n");
+			fprintf(stderr, "usage:\n telnetlogger [-p passwords.txt] [-i ips.txt] [-c telnetlog.csv] [-l port]\n");
 			exit(1);
 			break;
 		}
